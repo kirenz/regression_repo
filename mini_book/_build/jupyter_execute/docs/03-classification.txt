@@ -1,0 +1,590 @@
+#knitr::include_graphics("css/data-pipeline.png")
+
+#library(tidyverse)
+
+LINK <- "https://raw.githubusercontent.com/kirenz/datasets/master/housing_unclean.csv"
+housing_df <- read_csv(LINK)
+
+library(gt)
+
+housing_df %>% 
+  slice_head(n = 4) %>% 
+  gt() # print output using gt
+
+library(stringr)
+
+housing_df <- 
+  housing_df %>% 
+  mutate(
+    housing_median_age = str_remove_all(housing_median_age, "[years]"),
+    median_house_value = str_remove_all(median_house_value, "[$]")
+  )
+
+glimpse(housing_df)
+
+library(visdat)
+
+vis_dat(housing_df)
+
+housing_df %>% 
+  count(ocean_proximity,
+        sort = TRUE)
+
+# convert to numeric
+housing_df <- 
+  housing_df %>% 
+  mutate(
+    housing_median_age = as.numeric(housing_median_age),
+    median_house_value = as.numeric(median_house_value)
+  )
+
+# convert all remaining character variables to factors 
+housing_df <- 
+  housing_df %>% 
+  mutate(across(where(is.character), as.factor))
+
+vis_miss(housing_df, sort_miss = TRUE)
+
+is.na(housing_df) %>% colSums()
+
+housing_df <- 
+  housing_df %>% 
+  mutate(rooms_per_household = total_rooms/households,
+        bedrooms_per_room = total_bedrooms/total_rooms,
+        population_per_household = population/households)
+
+housing_df <- 
+  housing_df %>% 
+  mutate(price_category = case_when( 
+    median_house_value < 150000 ~ "below",
+    median_house_value >= 150000 ~ "above",
+    )) %>% 
+  mutate(price_category = as.factor(price_category)) %>% 
+  select(-median_house_value)
+
+library(gt)
+
+housing_df %>% 
+  count(price_category, # count observations
+        name ="districts_total") %>%  # name the new variable 
+  mutate(percent = districts_total/sum(districts_total)) %>%  # calculate percentages
+  gt() # create table
+
+housing_df %>% 
+  count(price_category, 
+        name ="districts_total") %>%
+  mutate(percent = districts_total/sum(districts_total)*100,
+         percent = round(percent, 2)) %>%
+ gt() %>%
+  tab_header(
+    title = "California median house prices",
+    subtitle = "Districts above and below 150.000$"
+  ) %>%
+  cols_label(
+    price_category = "Price",
+    districts_total = "Districts",
+    percent = "Percent"
+  ) %>% 
+  fmt_number(
+    columns = vars(districts_total),
+    suffixing = TRUE
+  ) 
+
+skim(housing_df)
+
+library(GGally)
+
+housing_df %>% 
+  select(
+    housing_median_age, 
+    median_income, bedrooms_per_room, rooms_per_household, 
+    population_per_household) %>% 
+  ggscatmat(alpha = 0.2)
+
+library(GGally)
+
+housing_df %>% 
+  select(
+    housing_median_age, 
+    median_income, bedrooms_per_room, rooms_per_household, 
+    population_per_household, ocean_proximity,
+    price_category) %>% 
+  ggpairs()
+
+
+housing_df %>% 
+  ggplot(aes(price_category)) +
+  geom_bar() 
+
+# Fix the random numbers by setting the seed 
+# This enables the analysis to be reproducible 
+set.seed(123)
+
+# Put 3/4 of the data into the training set 
+data_split <- initial_split(housing_df, 
+                           prop = 3/4, 
+                           strata = price_category)
+
+# Create dataframes for the two sets:
+train_data <- training(data_split) 
+test_data <- testing(data_split)
+
+data_explore <- train_data
+
+data_explore %>% 
+  ggplot(aes(x = longitude, y = latitude)) +
+  geom_point(color = "cornflowerblue")
+
+data_explore %>% 
+  ggplot(aes(x = longitude, y = latitude)) +
+  geom_point(color = "cornflowerblue", alpha = 0.1) 
+
+data_explore %>% 
+  ggplot(aes(x = longitude, y = latitude)) +
+  geom_point(aes(size = population, color = price_category), 
+             alpha = 0.4)
+
+library(ggmap)
+
+qmplot(x = longitude, 
+       y = latitude, 
+       data = data_explore, 
+       geom = "point", 
+       color = price_category, 
+       size = population,
+       alpha = 0.4) +
+  scale_alpha(guide = 'none') # don't show legend for alpha
+
+data_explore %>% 
+  ggplot(aes(x = price_category, y = median_income, 
+             fill = price_category, color = price_category)) +
+  geom_boxplot(alpha=0.4) 
+
+print_boxplot <- function(.y_var){
+  
+  # convert strings to variable
+  y_var <- sym(.y_var) 
+ 
+  # unquote variables using {{}}
+  data_explore %>% 
+  ggplot(aes(x = price_category, y = {{y_var}},
+             fill = price_category, color = price_category)) +
+  geom_boxplot(alpha=0.4) 
+  
+}  
+
+y_var <- 
+  data_explore %>% 
+  select(where(is.numeric), -longitude, - latitude) %>% 
+  variable.names() # obtain name
+
+
+library(purrr)
+
+map(y_var, print_boxplot)
+
+print_boxplot_out <- function(.y_var_out){
+  
+  y_var <- sym(.y_var_out) 
+ 
+  data_explore %>% 
+  filter(rooms_per_household < 50, population_per_household < 20) %>% 
+  ggplot(aes(x = price_category, y = {{y_var}},
+             fill = price_category, color = price_category)) +
+  geom_boxplot(alpha=0.4) 
+  
+} 
+
+y_var_out <- 
+  data_explore %>% 
+  select(rooms_per_household, population_per_household) %>% 
+  variable.names() 
+
+map(y_var_out, print_boxplot_out)
+
+library(GGally)
+
+data_explore %>% 
+  select(price_category, median_income, bedrooms_per_room, rooms_per_household, 
+         population_per_household) %>% 
+  ggscatmat(color="price_category", 
+            corMethod = "spearman",
+            alpha=0.2)
+
+library(gt)
+
+data_explore %>% 
+  count(price_category, ocean_proximity) %>% 
+  group_by(price_category) %>% 
+  mutate(percent = n / sum(n) *100,
+         percent = round(percent, 2)) %>% 
+  gt() %>% 
+    tab_header(
+    title = "California median house prices",
+    subtitle = "Districts above and below 150.000$"
+  ) %>% 
+  cols_label(
+    ocean_proximity = "Ocean Proximity",
+    n = "Districts",
+    percent = "Percent"
+  ) %>% 
+  fmt_number(
+    columns = vars(n),
+    suffixing = TRUE
+  ) 
+
+data_explore %>%
+  ggplot(aes(price_category, ocean_proximity)) +
+  geom_bin2d() +
+  scale_fill_continuous(type = "viridis") 
+
+housing_df_new <-
+  housing_df %>% 
+  select( # select our predictors
+    longitude, latitude, 
+    price_category, 
+    median_income, 
+    ocean_proximity, 
+    bedrooms_per_room, 
+    rooms_per_household, 
+    population_per_household
+         )
+
+glimpse(housing_df_new)
+
+set.seed(123)
+
+data_split <- initial_split(housing_df_new, # updated data
+                           prop = 3/4, 
+                           strata = price_category)
+
+train_data <- training(data_split) 
+test_data <- testing(data_split)
+
+housing_rec <-
+  recipe(price_category ~ .,
+         data = train_data) %>%
+  update_role(longitude, latitude, 
+              new_role = "ID") %>% 
+  step_log(
+    median_income,
+    bedrooms_per_room, rooms_per_household, 
+    population_per_household
+    ) %>% 
+  step_naomit(everything(), skip = TRUE) %>% 
+  step_novel(all_nominal(), -all_outcomes()) %>%
+  step_normalize(all_numeric(), -all_outcomes(), 
+                 -longitude, -latitude) %>% 
+  step_dummy(all_nominal(), -all_outcomes()) %>%
+  step_zv(all_numeric(), -all_outcomes()) %>%
+  step_corr(all_predictors(), threshold = 0.7, method = "spearman") 
+
+summary(housing_rec)
+
+prepped_data <- 
+  housing_rec %>% # use the recipe object
+  prep() %>% # perform the recipe on training data
+  juice() # extract only the preprocessed dataframe 
+
+glimpse(prepped_data)
+
+prepped_data %>% 
+  select(price_category, 
+         median_income, 
+         rooms_per_household, 
+         population_per_household) %>% 
+  ggscatmat(corMethod = "spearman",
+            alpha=0.2)
+
+set.seed(100)
+
+cv_folds <-
+ vfold_cv(train_data, 
+          v = 5, 
+          strata = price_category) 
+
+log_spec <- # your model specification
+  logistic_reg() %>%  # model type
+  set_engine(engine = "glm") %>%  # model engine
+  set_mode("classification") # model mode
+
+# Show your model specification
+log_spec
+
+library(ranger)
+
+rf_spec <- 
+  rand_forest() %>% 
+  set_engine("ranger", importance = "impurity") %>% 
+  set_mode("classification")
+
+library(xgboost)
+
+xgb_spec <- 
+  boost_tree() %>% 
+  set_engine("xgboost") %>% 
+  set_mode("classification") 
+
+knn_spec <- 
+  nearest_neighbor(neighbors = 4) %>% # we can adjust the number of neighbors 
+  set_engine("kknn") %>% 
+  set_mode("classification") 
+
+library(keras)
+
+nnet_spec <-
+  mlp() %>%
+  set_mode("classification") %>% 
+  set_engine("keras", verbose = 0) 
+
+log_wflow <- # new workflow object
+ workflow() %>% # use workflow function
+ add_recipe(housing_rec) %>%   # use the new recipe
+ add_model(log_spec)   # add your model spec
+
+# show object
+log_wflow
+
+rf_wflow <-
+ workflow() %>%
+ add_recipe(housing_rec) %>% 
+ add_model(rf_spec) 
+
+xgb_wflow <-
+ workflow() %>%
+ add_recipe(housing_rec) %>% 
+ add_model(xgb_spec)
+
+knn_wflow <-
+ workflow() %>%
+ add_recipe(housing_rec) %>% 
+ add_model(knn_spec)
+
+nnet_wflow <-
+ workflow() %>%
+ add_recipe(housing_rec) %>% 
+ add_model(nnet_spec)
+
+log_res <- 
+  log_wflow %>% 
+  fit_resamples(
+    resamples = cv_folds, 
+    metrics = metric_set(
+      recall, precision, f_meas, 
+      accuracy, kap,
+      roc_auc, sens, spec),
+    control = control_resamples(
+      save_pred = TRUE)
+    ) 
+
+# save model coefficients for a fitted model object from a workflow
+get_model <- function(x) {
+  pull_workflow_fit(x) %>% 
+    tidy()
+}
+
+# same as before with one exception
+log_res_2 <- 
+  log_wflow %>% 
+  fit_resamples(
+    resamples = cv_folds, 
+    metrics = metric_set(
+      recall, precision, f_meas, 
+      accuracy, kap,
+      roc_auc, sens, spec),
+    control = control_resamples(
+      save_pred = TRUE,
+      extract = get_model) # use extract and our new function
+    ) 
+
+log_res_2
+
+
+log_res_2$.extracts[[1]]
+
+log_res_2$.extracts[[1]][[1]]
+
+all_coef <- map_dfr(log_res_2$.extracts, ~ .x[[1]][[1]])
+
+filter(all_coef, term == "median_income")
+
+log_res %>%  collect_metrics(summarize = TRUE)
+
+log_res %>%  collect_metrics(summarize = FALSE)
+
+log_pred <- 
+  log_res %>%
+  collect_predictions()
+
+log_pred %>%
+  conf_mat(price_category, .pred_class) 
+
+log_pred %>%
+  conf_mat(price_category, .pred_class) %>% 
+  autoplot(type = "mosaic")
+
+log_pred %>%
+  conf_mat(price_category, .pred_class) %>% 
+  autoplot(type = "heatmap")
+
+
+log_pred %>%
+  group_by(id) %>% # id contains our folds
+  roc_curve(price_category, .pred_above) %>% 
+  autoplot()
+
+
+log_res %>%
+  collect_predictions() %>% 
+  ggplot() +
+  geom_density(aes(x = .pred_above, fill = price_category), 
+               alpha = 0.5)
+
+rf_res <-
+  rf_wflow %>% 
+  fit_resamples(
+    resamples = cv_folds, 
+    metrics = metric_set(
+      recall, precision, f_meas, 
+      accuracy, kap,
+      roc_auc, sens, spec),
+    control = control_resamples(save_pred = TRUE)
+    ) 
+
+rf_res %>%  collect_metrics(summarize = TRUE)
+
+xgb_res <- 
+  xgb_wflow %>% 
+  fit_resamples(
+    resamples = cv_folds, 
+    metrics = metric_set(
+      recall, precision, f_meas, 
+      accuracy, kap,
+      roc_auc, sens, spec),
+    control = control_resamples(save_pred = TRUE)
+    ) 
+
+xgb_res %>% collect_metrics(summarize = TRUE)
+
+knn_res <- 
+  knn_wflow %>% 
+  fit_resamples(
+    resamples = cv_folds, 
+    metrics = metric_set(
+      recall, precision, f_meas, 
+      accuracy, kap,
+      roc_auc, sens, spec),
+    control = control_resamples(save_pred = TRUE)
+    ) 
+
+knn_res %>% collect_metrics(summarize = TRUE)
+
+nnet_res <- 
+  nnet_wflow %>% 
+  fit_resamples(
+    resamples = cv_folds, 
+    metrics = metric_set(
+      recall, precision, f_meas, 
+      accuracy, kap,
+      roc_auc, sens, spec),
+    control = control_resamples(save_pred = TRUE)
+    ) 
+
+nnet_res %>% collect_metrics(summarize = TRUE)
+
+
+log_metrics <- 
+  log_res %>% 
+  collect_metrics(summarise = TRUE) %>%
+  mutate(model = "Logistic Regression") # add the name of the model to every row
+
+rf_metrics <- 
+  rf_res %>% 
+  collect_metrics(summarise = TRUE) %>%
+  mutate(model = "Random Forest")
+
+xgb_metrics <- 
+  xgb_res %>% 
+  collect_metrics(summarise = TRUE) %>%
+  mutate(model = "XGBoost")
+
+knn_metrics <- 
+  knn_res %>% 
+  collect_metrics(summarise = TRUE) %>%
+  mutate(model = "Knn")
+
+nnet_metrics <- 
+  nnet_res %>% 
+  collect_metrics(summarise = TRUE) %>%
+  mutate(model = "Neural Net")
+
+# create dataframe with all models
+model_compare <- bind_rows(log_metrics,
+                           rf_metrics,
+                           xgb_metrics,
+                           knn_metrics,
+                           nnet_metrics) 
+
+# change data structure
+model_comp <- 
+  model_compare %>% 
+  select(model, .metric, mean, std_err) %>% 
+  pivot_wider(names_from = .metric, values_from = c(mean, std_err)) 
+
+# show mean F1-Score for every model
+model_comp %>% 
+  arrange(mean_f_meas) %>% 
+  mutate(model = fct_reorder(model, mean_f_meas)) %>% # order results
+  ggplot(aes(model, mean_f_meas, fill=model)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_brewer(palette = "Blues") +
+   geom_text(
+     size = 3,
+     aes(label = round(mean_f_meas, 2), y = mean_f_meas + 0.08),
+     vjust = 1
+  )
+
+# show mean area under the curve (auc) per model
+model_comp %>% 
+  arrange(mean_roc_auc) %>% 
+  mutate(model = fct_reorder(model, mean_roc_auc)) %>%
+  ggplot(aes(model, mean_roc_auc, fill=model)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_brewer(palette = "Blues") + 
+     geom_text(
+     size = 3,
+     aes(label = round(mean_roc_auc, 2), y = mean_roc_auc + 0.08),
+     vjust = 1
+  )
+
+model_comp %>% slice_max(mean_f_meas)
+
+last_fit_rf <- last_fit(rf_wflow, 
+                        split = data_split,
+                        metrics = metric_set(
+                          recall, precision, f_meas, 
+                          accuracy, kap,
+                          roc_auc, sens, spec)
+                        )
+
+last_fit_rf %>% 
+  collect_metrics()
+
+library(vip)
+
+last_fit_rf %>% 
+  pluck(".workflow", 1) %>%   
+  pull_workflow_fit() %>% 
+  vip(num_features = 10)
+
+last_fit_rf %>%
+  collect_predictions() %>% 
+  conf_mat(price_category, .pred_class) %>% 
+  autoplot(type = "heatmap")
+
+last_fit_rf %>% 
+  collect_predictions() %>% 
+  roc_curve(price_category, .pred_above) %>% 
+  autoplot()

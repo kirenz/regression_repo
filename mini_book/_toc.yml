@@ -1,0 +1,20 @@
+format: jb-book
+root: docs/index
+parts:
+  - caption: Introduction
+    chapters:
+    - file: docs/01-crispdm.ipynb
+    - file: docs/getting_started
+  - caption: Regression
+    chapters:
+    - file: docs/02-regression.ipynb
+      sections:
+      - file: docs/python_by_example
+  - caption: Classification
+    chapters:
+    - file: docs/03-classification.ipynb
+      sections:
+      - file: docs/04-reference.ipynb
+  - caption: References
+    chapters:
+    - file: docs/04-reference.md

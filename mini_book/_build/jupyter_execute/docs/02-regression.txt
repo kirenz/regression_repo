@@ -1,0 +1,575 @@
+library(tidyverse)
+library(skimr)
+library(GGally)
+library(ggmap)
+library(tidymodels)
+library(visdat)
+library(corrr)
+library(ggsignif)
+library(gt)
+
+theme_set(theme_classic())
+
+
+
+knitr::include_graphics("css/data-pipeline.png")
+
+
+library(tidyverse)
+
+LINK <- "https://raw.githubusercontent.com/kirenz/datasets/master/housing_unclean.csv"
+housing_df <- read_csv(LINK)
+
+
+library(gt)
+
+housing_df %>% 
+  slice_head(n = 4) %>% 
+  gt() # print output using gt
+
+
+library(stringr)
+
+housing_df <- 
+  housing_df %>% 
+  mutate(
+    housing_median_age = str_remove_all(housing_median_age, "[years]"),
+    median_house_value = str_remove_all(median_house_value, "[$]")
+  )
+
+
+glimpse(housing_df)
+
+
+library(visdat)
+
+vis_dat(housing_df)
+
+
+housing_df %>% 
+  count(ocean_proximity,
+        sort = TRUE)
+
+
+# convert to numeric
+housing_df <- 
+  housing_df %>% 
+  mutate(
+    housing_median_age = as.numeric(housing_median_age),
+    median_house_value = as.numeric(median_house_value)
+  )
+
+# convert all remaining character variables to factors 
+housing_df <- 
+  housing_df %>% 
+  mutate(across(where(is.character), as.factor))
+
+
+vis_miss(housing_df, sort_miss = TRUE)
+
+
+is.na(housing_df) %>% colSums()
+
+
+
+housing_df <- 
+  housing_df %>% 
+  mutate(rooms_per_household = total_rooms/households,
+        bedrooms_per_room = total_bedrooms/total_rooms,
+        population_per_household = population/households)
+
+
+
+skim(housing_df)
+
+
+library(GGally)
+
+housing_df %>% 
+  select(
+    median_house_value, housing_median_age, 
+    median_income, bedrooms_per_room, rooms_per_household, 
+    population_per_household) %>% 
+  ggscatmat(alpha = 0.2)
+
+
+library(GGally)
+
+housing_df %>% 
+  select(
+    median_house_value, housing_median_age, 
+    median_income, bedrooms_per_room, rooms_per_household, 
+    population_per_household,
+    ocean_proximity) %>% 
+  ggpairs()
+
+
+
+housing_df %>% 
+  ggplot(aes(median_house_value)) +
+  geom_histogram(bins = 4) 
+
+
+
+# Fix the random numbers by setting the seed 
+# This enables the analysis to be reproducible 
+set.seed(123)
+
+# Put 3/4 of the data into the training set 
+data_split <- initial_split(housing_df, 
+                           prop = 3/4, 
+                           strata = median_house_value, 
+                           breaks = 4)
+
+# Create dataframes for the two sets:
+train_data <- training(data_split) 
+test_data <- testing(data_split)
+
+
+
+data_explore <- train_data
+
+
+
+data_explore %>% 
+  ggplot(aes(x = longitude, y = latitude)) +
+  geom_point(color = "cornflowerblue")
+
+
+
+data_explore %>% 
+  ggplot(aes(x = longitude, y = latitude)) +
+  geom_point(color = "cornflowerblue", alpha = 0.1) 
+  
+
+
+data_explore %>% 
+  ggplot(aes(x = longitude, y = latitude)) +
+  geom_point(aes(size = population, color = median_house_value), 
+             alpha = 0.4) +
+  scale_colour_gradientn(colours=rev(rainbow(4)))
+
+
+library(ggmap)
+
+qmplot(x = longitude, 
+       y = latitude, 
+       data = data_explore, 
+       geom = "point", 
+       color = median_house_value, 
+       size = population,
+       alpha = 0.4) +
+  scale_colour_gradientn(colours=rev(rainbow(4))) +
+  scale_alpha(guide = 'none') # don't show legend for alpha
+
+
+library(ggsignif)
+
+data_explore %>% 
+  ggplot(aes(ocean_proximity, median_house_value)) +
+  geom_boxplot(fill="steelblue") +
+  xlab("Ocean proximity") +
+  ylab("Median house value") +
+  geom_signif(comparisons = list(c("<1H OCEAN", "INLAND")), # calculate significance
+               map_signif_level=TRUE) 
+  
+
+library(visdat)
+
+data_explore %>% 
+  select(where(is.numeric)) %>% # only select numerical data
+  vis_cor(cor_method = "spearman", na_action = "pairwise.complete.obs")
+
+
+library(corrr)
+
+# calculate all correlations
+cor_res <- 
+  data_explore %>%
+  select(where(is.numeric)) %>% 
+  correlate(method = "spearman", use = "pairwise.complete.obs") 
+
+# show correlations
+cor_res %>% 
+  select(term, median_house_value) %>% 
+  filter(!is.na(median_house_value)) %>% # focus on dependent variable 
+  arrange(median_house_value) %>% # sort values
+  fashion() # print tidy correlations
+  
+
+
+data_explore %>%
+  select(where(is.numeric)) %>%  
+  correlate() %>% 
+  network_plot(min_cor = .15)
+
+
+
+cor.test(data_explore$median_house_value, 
+         data_explore$population_per_household, 
+         method = "spearman", 
+         exact=FALSE)$p.value
+
+cor.test(data_explore$median_house_value, 
+         data_explore$bedrooms_per_room, 
+         method = "spearman", 
+         exact=FALSE)$p.value
+
+cor.test(data_explore$median_house_value, 
+         data_explore$rooms_per_household, 
+         method = "spearman", 
+         exact=FALSE)$p.value
+
+cor.test(data_explore$median_house_value, 
+         data_explore$population_per_household, 
+         method = "spearman", 
+         exact=FALSE)$p.value
+
+
+
+data_explore %>% 
+  select(median_house_value, ocean_proximity, 
+         median_income, bedrooms_per_room, rooms_per_household, 
+         population_per_household) %>% 
+  ggscatmat(corMethod = "spearman",
+            alpha=0.2)
+
+
+
+data_explore %>% 
+  select(median_house_value, ocean_proximity, 
+         median_income, bedrooms_per_room, rooms_per_household, 
+         population_per_household) %>% 
+  ggscatmat(color="ocean_proximity", # add a categorical variable
+            corMethod = "spearman",
+            alpha=0.2)
+
+
+
+data_explore %>% 
+  ggplot(aes(median_income, median_house_value)) +
+  geom_jitter(color = "steelblue", alpha = 0.2) + 
+  xlab("Median income") +
+  ylab("Median house value") +
+  scale_y_continuous(labels = scales::dollar)
+
+
+
+housing_df_new <-
+  housing_df %>% 
+  filter(median_house_value < 500000) %>% # only use houses with a value below 500000
+  select( # select our predictors
+    longitude, latitude, 
+    median_house_value, 
+    median_income, 
+    ocean_proximity, 
+    bedrooms_per_room, 
+    rooms_per_household, 
+    population_per_household
+         )
+
+glimpse(housing_df_new)
+
+
+
+set.seed(123)
+
+data_split <- initial_split(housing_df_new, # updated data
+                           prop = 3/4, 
+                           strata = median_house_value, 
+                           breaks = 4)
+
+train_data <- training(data_split) 
+test_data <- testing(data_split)
+
+
+
+housing_rec <-
+  recipe(median_house_value ~ .,
+         data = train_data) %>%
+  update_role(longitude, latitude, 
+              new_role = "ID") %>% 
+  step_log(
+    median_house_value, median_income,
+    bedrooms_per_room, rooms_per_household, 
+    population_per_household
+    ) %>% 
+  step_naomit(everything(), skip = TRUE) %>% 
+  step_novel(all_nominal(), -all_outcomes()) %>%
+  step_normalize(all_numeric(), -all_outcomes(), 
+                 -longitude, -latitude) %>% 
+  step_dummy(all_nominal()) %>%
+  step_zv(all_numeric(), -all_outcomes()) %>%
+  step_corr(all_predictors(), threshold = 0.7, method = "spearman") 
+
+
+
+summary(housing_rec)
+
+
+
+prepped_data <- 
+  housing_rec %>% # use the recipe object
+  prep() %>% # perform the recipe on training data
+  juice() # extract only the preprocessed dataframe 
+
+
+
+glimpse(prepped_data)
+
+
+prepped_data %>% 
+  select(median_house_value, 
+         median_income, 
+         rooms_per_household, 
+         population_per_household) %>% 
+  ggscatmat(corMethod = "spearman",
+            alpha=0.2)
+
+
+set.seed(100)
+
+cv_folds <-
+ vfold_cv(train_data, 
+          v = 5, # number of folds
+          strata = median_house_value,
+          breaks = 4) 
+
+
+
+lasso_spec <- # your model specification
+  linear_reg(penalty = 0.1, mixture = 1) %>%  # model type and some options
+  set_engine(engine = "glmnet") %>%  # model engine
+  set_mode("regression") # model mode
+
+# Show your model specification
+lasso_spec
+
+
+
+spline_spec <- 
+  linear_reg() %>%  
+  set_engine(engine = "lm") %>%  
+  set_mode("regression")
+
+
+library(ranger)
+
+rf_spec <- 
+  rand_forest() %>% 
+  set_engine("ranger") %>% 
+  set_mode("regression")
+
+
+library(xgboost)
+
+xgb_spec <- 
+  boost_tree() %>% 
+  set_engine("xgboost") %>% 
+  set_mode("regression") 
+
+
+
+knn_spec <- 
+  nearest_neighbor(neighbors = 4) %>% # we can adjust the number of neighbors 
+  set_engine("kknn") %>% 
+  set_mode("regression") 
+
+
+
+lasso_wflow <- # new workflow object
+ workflow() %>% # use workflow function
+ add_recipe(housing_rec) %>%   # use the new recipe
+ add_model(lasso_spec)   # add your model spec
+
+
+library(splines)
+
+housing_rec_spline <- 
+  housing_rec %>%  
+  step_ns(all_predictors(), deg_free = 3) # natural spline
+
+
+
+spline_wflow <- 
+ workflow() %>% 
+ add_recipe(housing_rec_spline) %>%   # use the spline recipe
+ add_model(spline_spec) 
+
+
+
+rf_wflow <-
+ workflow() %>%
+ add_recipe(housing_rec) %>% 
+ add_model(rf_spec) 
+
+
+
+xgb_wflow <-
+ workflow() %>%
+ add_recipe(housing_rec) %>% 
+ add_model(xgb_spec)
+
+
+
+knn_wflow <-
+ workflow() %>%
+ add_recipe(housing_rec) %>% 
+ add_model(knn_spec)
+
+
+
+set.seed(100)
+
+lasso_res <- 
+  lasso_wflow %>% # use workflow object
+  fit_resamples(resamples = cv_folds,
+                control = control_resamples(save_pred = TRUE) # save predictions
+    )
+
+
+
+lasso_res %>%  collect_metrics(summarize = TRUE)
+
+
+
+lasso_res %>%  collect_metrics(summarize = FALSE)
+
+
+
+assess_res <- collect_predictions(lasso_res)
+
+assess_res %>% 
+  ggplot(aes(x = median_house_value, y = .pred)) + 
+  geom_point(alpha = .15) +
+  geom_abline(col = "red") + 
+  coord_obs_pred() + 
+  ylab("Predicted")
+
+
+
+wrongest_prediction <- 
+  assess_res %>% 
+  mutate(residual = median_house_value - .pred) %>% 
+  arrange(desc(abs(residual))) %>% 
+  slice_head(n = 10)
+
+wrongest_prediction
+
+
+
+train_data %>% 
+  dplyr::slice(wrongest_prediction$.row) 
+
+
+
+spline_res <-
+  spline_wflow %>% 
+  fit_resamples(
+    resamples = cv_folds,
+    control = control_resamples(save_pred = TRUE)
+    )
+
+spline_res %>%  collect_metrics(summarize = TRUE)
+
+
+
+rf_res <-
+  rf_wflow %>% 
+  fit_resamples(
+    resamples = cv_folds,
+    control = control_resamples(save_pred = TRUE)
+    )
+
+rf_res %>%  collect_metrics(summarize = TRUE)
+
+
+
+xgb_res <- 
+  xgb_wflow %>% 
+  fit_resamples(
+    resamples = cv_folds,
+    control = control_resamples(save_pred = TRUE)
+    ) 
+
+xgb_res %>% collect_metrics(summarize = TRUE)
+
+
+
+knn_res <- 
+  knn_wflow %>% 
+  fit_resamples(
+    resamples = cv_folds,
+    control = control_resamples(save_pred = TRUE)
+    ) 
+
+knn_res %>% collect_metrics(summarize = TRUE)
+
+
+
+lasso_rmse <- 
+  lasso_res %>% 
+  collect_metrics(summarise = TRUE) %>%
+  mutate(model = "lasso")
+
+spline_rmse <- 
+  spline_res %>% 
+  collect_metrics(summarise = TRUE) %>%
+  mutate(model = "spline")
+
+rf_rmse <- 
+  rf_res %>% 
+  collect_metrics(summarise = TRUE) %>%
+  mutate(model = "random forest")
+
+xgb_rmse <- 
+  xgb_res %>% 
+  collect_metrics(summarise = TRUE) %>%
+  mutate(model = "XGBoost")
+
+knn_rmse <- 
+  knn_res %>% 
+  collect_metrics(summarise = TRUE) %>%
+  mutate(model = "Knn")
+
+# create dataframe with all models
+model_compare <- bind_rows(lasso_rmse,
+                           spline_rmse,
+                           rf_rmse,
+                           xgb_rmse,
+                           knn_rmse) 
+
+# change data structure
+model_comp <- 
+  model_compare %>% 
+  select(model, .metric, mean, std_err) %>% 
+  pivot_wider(names_from = .metric, values_from = c(mean, std_err)) 
+
+# show rmse 
+model_comp %>% 
+  arrange(mean_rmse) %>% 
+  mutate(model = fct_reorder(model, mean_rmse)) %>%
+  ggplot(aes(model, mean_rmse, fill=model)) +
+  geom_col() +
+  scale_fill_brewer(palette = "Blues")
+
+# show rsq 
+model_comp %>% 
+  arrange(mean_rsq) %>% 
+  mutate(model = fct_reorder(model, desc(mean_rsq))) %>%
+  ggplot(aes(model, mean_rsq, fill=model)) +
+  geom_col() +
+  scale_fill_brewer(palette = "Blues")
+  
+
+# find minimum rmse
+model_comp %>% 
+  slice_min(mean_rmse)
+
+
+last_fit_xgb <- last_fit(xgb_wflow, split = data_split)
+
+# Show RMSE and RSQ
+last_fit_xgb %>% 
+  collect_metrics()
+
